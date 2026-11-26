@@ -1,0 +1,68 @@
+name: Process photos
+
+on:
+  push:
+    paths:
+      - 'incoming/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Pillow
+        run: pip install pillow
+
+      - name: Generate web fulls and thumbs
+        run: |
+          python3 - << 'PY'
+          import os
+          from PIL import Image, ImageOps
+
+          SRC = 'incoming'
+          FULLS = 'images/fulls'
+          THUMBS = 'images/thumbs'
+          os.makedirs(FULLS, exist_ok=True)
+          os.makedirs(THUMBS, exist_ok=True)
+          exts = ('.jpg', '.jpeg', '.png', '.webp')
+          made = []
+          for name in sorted(os.listdir(SRC)):
+              if not name.lower().endswith(exts):
+                  continue
+              out_name = os.path.splitext(name)[0] + '.jpg'
+              full_path = os.path.join(FULLS, out_name)
+              thumb_path = os.path.join(THUMBS, out_name)
+              if os.path.exists(full_path) and os.path.exists(thumb_path):
+                  continue
+              im = Image.open(os.path.join(SRC, name))
+              im = ImageOps.exif_transpose(im).convert('RGB')
+              full = im.copy()
+              full.thumbnail((1600, 1600))
+              full.save(full_path, quality=82)
+              thumb = im.copy()
+              thumb.thumbnail((700, 700))
+              thumb.save(thumb_path, quality=80)
+              made.append(out_name)
+          print('processed:', made)
+          PY
+
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add images/fulls images/thumbs
+          if git diff --cached --quiet; then
+            echo "nothing new to commit"
+          else
+            git commit -m "Auto-process photos from incoming/"
+            git push
+          fi
